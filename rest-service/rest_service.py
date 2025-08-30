@@ -21,6 +21,30 @@ from opentelemetry.sdk.resources import Resource
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.instrumentation.grpc import GrpcInstrumentorClient
 
+# --- JWT Imports ---
+import requests
+from jose import jwt, jwk, JWTError
+
+# --- Keycloak JWT Setup ---
+JWKS_URL = "http://keycloak:8080/realms/dsa-lab/protocol/openid-connect/certs"
+ISSUER = "http://localhost:8081/realms/dsa-lab"
+AUDIENCE = "rest-client"
+
+# A retry loop to wait for Keycloak to be ready on startup
+for i in range(10): # Try up to 10 times
+    try:
+        jwks_response = requests.get(JWKS_URL, timeout=5)
+        jwks_response.raise_for_status() # Raises an exception for bad status codes
+        jwks = jwks_response.json()
+        KEYS = {k["kid"]: jwk.construct(k) for k in jwks["keys"]}
+        logging.info("Successfully fetched keys from Keycloak.")
+        break # Exit the loop if successful
+    except requests.exceptions.RequestException as e:
+        logging.warning(f"Could not connect to Keycloak (attempt {i+1}/10): {e}")
+        time.sleep(5) # Wait 5 seconds before retrying
+else:
+    logging.error("Failed to fetch keys from Keycloak after multiple retries. Exiting.")
+    exit(1)
 
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
@@ -73,29 +97,50 @@ REQUEST_COUNTER = Counter(
 )
 
 
-
-# --- Record Metrics for FastAPI REST-service ---
-
-# Worker to collect data from all requests
 @app.middleware("http")
-async def track_metrics(request: Request, call_next):
-    
+async def main_middleware(request: Request, call_next):
     start_time = time.time()
 
-    response = await call_next(request)
+    # --- JWT Logic ---
+    # We skip JWT validation for the /metrics endpoint
+    if request.url.path != "/metrics":
+        auth_header = request.headers.get("Authorization", "")
+        if not auth_header.startswith("Bearer "):
+            return Response("missing Bearer token", status_code=401, media_type="text/plain")
+        
+        token = auth_header.removeprefix("Bearer ").strip()
+        try:
+            header = jwt.get_unverified_header(token)
+            kid = header.get("kid")
+            if kid not in KEYS:
+                return Response("unknown kid", status_code=401, media_type="text/plain")
+            
+            public_key = KEYS[kid]
+            
+            claims = jwt.decode(
+                token,
+                public_key.to_pem(),
+                algorithms=[header.get("alg")],
+                audience=AUDIENCE,
+                issuer=ISSUER,
+            )
+            request.state.user = claims.get("preferred_username", claims.get("sub"))
+        except JWTError as exc:
+            return Response(f"invalid token: {exc}", status_code=401, media_type="text/plain")
+    # --- End of JWT Logic ---
 
+    # To track metrics
+    response = await call_next(request)
     process_time = time.time() - start_time
     endpoint = request.url.path
-
-    # Group paths like /items/{item_id}
     if request.scope.get('root_path'):
          endpoint = request.scope['root_path'] + endpoint
-
     REQUEST_LATENCY.labels(request.method, endpoint).observe(process_time)
-
     REQUEST_COUNTER.labels(request.method, endpoint, response.status_code).inc()
 
     return response
+    
+    
 
 # Expose collected data
 @app.get("/metrics", status_code=200)

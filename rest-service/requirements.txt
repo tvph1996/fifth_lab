@@ -11,3 +11,6 @@ opentelemetry-sdk==1.25.0
 opentelemetry-exporter-otlp==1.25.0
 opentelemetry-instrumentation-fastapi==0.46b0
 opentelemetry-instrumentation-grpc==0.46b0
+
+python-jose[cryptography]==3.3.0
+requests==2.32.1

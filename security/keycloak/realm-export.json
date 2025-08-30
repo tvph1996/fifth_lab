@@ -1,0 +1,41 @@
+{
+  "realm": "dsa-lab",
+  "enabled": true,
+  "clients": [
+    {
+      "clientId": "rest-client",
+      "publicClient": true,
+      "directAccessGrantsEnabled": true,
+      "redirectUris": [
+        "http://localhost/*"
+      ],
+      "defaultRoles": [
+        "ROLE_USER"
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "tvph1996",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "H.g.t.124"
+        }
+      ],
+      "realmRoles": [
+        "ROLE_USER"
+      ]
+    }
+  ],
+  "roles": {
+    "realm": [
+      {
+        "name": "ROLE_USER",
+        "description": "A standard user role"
+      }
+    ]
+  }
+}

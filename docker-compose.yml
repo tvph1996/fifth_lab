@@ -1,0 +1,90 @@
+services:
+
+
+  mongodb:
+    image: mongo:latest
+    container_name: mongodb
+    ports:
+      - "27017:27017"
+
+
+  grpc-service:
+    build: ./grpc-service
+    depends_on:
+      - mongodb
+    environment:
+      MONGO_HOST: mongodb
+      MONGO_PORT: 27017
+      MONGO_DB: itemsdb
+      
+      OTEL_EXPORTER_OTLP_ENDPOINT: "otel-collector:4317"
+
+    ports:
+      - "50051:50051"
+      - "9103:9103" # Prometheus
+
+
+  rest-service:
+    build: ./rest-service
+    depends_on:
+      - grpc-service
+      - otel-collector
+    ports:
+      - "5000:5000"
+    environment:
+      GRPC_HOST: grpc-service
+      GRPC_PORT: 50051
+      OTEL_EXPORTER_OTLP_ENDPOINT: "otel-collector:4317" 
+
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    volumes:
+      # Mount the configuration file from project into the container
+      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro,Z
+    command:
+      # Tell Prometheus to use the configuration file just mounted
+      - "--config.file=/etc/prometheus/prometheus.yml"
+    ports:
+      - "9090:9090"
+
+
+  grafana:
+    image: grafana/grafana:10.4.2
+    container_name: grafana
+    depends_on:
+      - prometheus
+    ports:
+      - "3000:3000"
+    volumes:
+      # Mount the provisioning files from project into the container
+      - ./observability/grafana-provisioning:/etc/grafana/provisioning:ro,Z
+      - grafana-data:/var/lib/grafana
+
+      
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: otel-collector
+    command: ["--config=/etc/otel-collector-config.yml"]
+    volumes:
+      - ./observability/otel-collector-config.yml:/etc/otel-collector-config.yml:ro,Z
+    ports:
+      - "4317:4317" # OTLP-gRPC receiver
+      # not used - "4318:4318" # OTLP-HTTP receiver
+    depends_on:
+      - jaeger
+
+
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    container_name: jaeger
+    ports:
+      - "16686:16686" # Jaeger UI
+      - "14268:14268"
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+
+      
+volumes:
+  grafana-data:

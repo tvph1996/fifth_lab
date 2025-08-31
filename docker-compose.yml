@@ -85,6 +85,8 @@ services:
       - "traefik.http.services.rest.loadbalancer.server.port=5000"
       - "traefik.http.routers.rest.tls=true"
       - "traefik.http.routers.rest.tls.certresolver=default"
+      - "traefik.http.middlewares.rest-stripprefix.stripprefix.prefixes=/api"
+      - "traefik.http.routers.rest.middlewares=rest-stripprefix"
     volumes:
       - ./security:/app/security:ro,Z
 

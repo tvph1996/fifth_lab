@@ -264,6 +264,22 @@ def serve():
     start_http_server(9103)
     logging.info("Prometheus metrics server started on port 9103.")
 
+    # Use absolute paths inside the container
+    CERT_PATH = "/app/security/certs"
+
+    # Load credentials for mTLS
+    with open(f'{CERT_PATH}/grpc-service.key', 'rb') as f:
+        private_key = f.read()
+    with open(f'{CERT_PATH}/grpc-service.crt', 'rb') as f:
+        certificate_chain = f.read()
+    with open(f'{CERT_PATH}/ca.crt', 'rb') as f:
+        root_certificates = f.read()
+
+    server_credentials = grpc.ssl_server_credentials(
+      private_key_certificate_chain_pairs=[(private_key, certificate_chain)],
+      root_certificates=root_certificates,
+      require_client_auth=True
+    )
 
     # Start gRPC-server WITH Prometheus as interceptor
     server = grpc.server(
@@ -273,11 +289,11 @@ def serve():
     myitems_pb2_grpc.add_ItemServiceServicer_to_server(ItemServiceServicer(), server)
 
     
-    # Start the gRPC server
+    # Start the gRPC server on a SECURE port
     port = os.environ.get("GRPC_PORT", "50051")
-    server.add_insecure_port(f"[::]:{port}")
+    server.add_secure_port(f"[::]:{port}", server_credentials)
     server.start()
-    logging.info(f"gRPC server listening on port {port}.")
+    logging.info(f"gRPC server listening securely on port {port}.")
     server.wait_for_termination()
 
 

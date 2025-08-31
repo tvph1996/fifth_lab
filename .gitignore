@@ -2,4 +2,6 @@ security/certs/*.key
 *.txt
 *.jwt
 *.pdf
+*.docx#
+*.srl
 

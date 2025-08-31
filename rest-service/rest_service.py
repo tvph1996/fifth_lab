@@ -102,8 +102,7 @@ async def main_middleware(request: Request, call_next):
     start_time = time.time()
 
     # --- JWT Logic ---
-    # We skip JWT validation for the /metrics endpoint
-    if request.url.path != "/metrics":
+    if request.url.path not in ["/metrics", "/healthz"]:
         auth_header = request.headers.get("Authorization", "")
         if not auth_header.startswith("Bearer "):
             return Response("missing Bearer token", status_code=401, media_type="text/plain")
@@ -140,9 +139,12 @@ async def main_middleware(request: Request, call_next):
 
     return response
     
+
+@app.get("/healthz", status_code=200)
+def healthz():
+    return {"status": "ok"}
     
 
-# Expose collected data
 @app.get("/metrics", status_code=200)
 def metrics():
     return Response(content=generate_latest(), media_type="text/plain; version=0.0.4")
@@ -193,61 +195,51 @@ async def add_item(request: Request):
     if not all([isinstance(item_id, int), name]):
         raise HTTPException(status_code=400, detail="Request must include 'id' and 'name'.")
 
-    grpc_request = myitems_pb2.Item(id=item_id, name=name) # type: ignore
+    grpc_request = myitems_pb2.Item(id=item_id, name=name)
 
     for attempt in range(MAX_RETRIES + 1):
-
         try:
-            
-            if breaker.current_state == 'CLOSED':
-                
+            if breaker.current_state == 'OPEN':
+                raise CircuitBreakerError("Circuit breaker is open.")
+
+            if breaker.current_state == 'HALF_OPEN':
+                logging.info("Circuit breaker is HALF_OPEN, creating a new secure channel for testing.")
+                temp_channel = grpc.secure_channel(GRPC_ADDRESS, channel_credentials)
+                temp_stub = myitems_pb2_grpc.ItemServiceStub(temp_channel)
+                response = breaker.call(temp_stub.AddItem, grpc_request, timeout=1.0)
+            else: # State is CLOSED
                 response = breaker.call(gRPC_methods.AddItem, grpc_request, timeout=1.0)
-            
-            else:
-                
-                # Only create new channel when CircuitBreaker is HALF_OPEN
-                gRPC_methods = myitems_pb2_grpc.ItemServiceStub(gRPC_new_channel)
-                response = breaker.call(gRPC_methods.AddItem, grpc_request, timeout=1.0)
-            
             
             if response.result:
-                
                 content = {"message": "Item added successfully.", "item": {"id": response.added_item.id, "name": response.added_item.name}}
                 return Response(content=json.dumps(content) + "\n", status_code=201, media_type="application/json")
-
             else:
                 raise HTTPException(status_code=409, detail="Item with ID or name already exists.")
-                
 
-        except (CircuitBreakerError):
-
-            content = {
-                "status": "error",
-                "message": "Service unavailable. The circuit breaker is open. Please try again later."
-            }
-            logging.warning(f"gRPC-service unavailable. Calls will no longer be accepted. Please try again later. {body}")
+        except CircuitBreakerError:
+            content = {"status": "error", "message": "Service unavailable. The circuit breaker is open."}
+            logging.warning(f"gRPC-service unavailable. Circuit breaker is open for request: {body}")
             return Response(content=json.dumps(content) + "\n", status_code=503, media_type="application/json")           
 
-
         except grpc.RpcError as err:
-            
-            logging.warning(f"Call {attempt + 1} failed")
+            logging.warning(f"Call attempt {attempt + 1} failed with gRPC error: {err.details()}")
+            breaker.failure(err) # Manually record a failure for the breaker
             await asyncio.sleep(delay)
             delay *= 2
+    
+    # If all retries fail
+    raise HTTPException(status_code=503, detail="Service is unavailable after multiple retries.")
     
     
 
 @app.get("/items/")
-def get_items(item_id: int = 0, name: str = ""):
-
+def get_items(id: int = 0, name: str = ""):
     try:
-
-        if not item_id and not name:
+        if not id and not name:
             raise HTTPException(status_code=400, detail="Provide 'id' or 'name'.")
 
-
         stub = myitems_pb2_grpc.ItemServiceStub(gRPC_channel)
-        request = myitems_pb2.Item(id=item_id, name=name)
+        request = myitems_pb2.Item(id=id, name=name)
         responses = stub.GetItem(request, timeout=2.0)
         results = [{"id": resp.requested_item.id, "name": resp.requested_item.name} for resp in responses if resp.result]
 
@@ -256,12 +248,9 @@ def get_items(item_id: int = 0, name: str = ""):
 
         return {"message": "Items retrieved successfully.", "items": results}
 
-
     except grpc.RpcError as e:
-
         if e.code() == grpc.StatusCode.NOT_FOUND:
             raise HTTPException(status_code=404, detail=e.details())
-
         else:
             raise HTTPException(status_code=500, detail=f"gRPC-service failure: {e.details()}")
 

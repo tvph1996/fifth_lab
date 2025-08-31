@@ -22,6 +22,8 @@
 
 Simply `docker compose up -d`
 
+&nbsp;
+
 # USEFUL COMMANDS
 
 ### **Portainer**

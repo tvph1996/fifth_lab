@@ -28,6 +28,10 @@ Simply `docker compose up -d`
 
 `https://localhost:9443`
 
+### **Traefik**
+
+`http://localhost:8080`
+
 ### **Keycloak**
 
 `http://localhost:8081`

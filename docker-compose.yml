@@ -14,16 +14,18 @@ services:
     image: traefik:v2.11
     restart: always
     command:
+      - "--configFile=/etc/traefik/traefik.yml" 
       - "--entryPoints.websecure.address=:443"
       - "--providers.docker=true"
       - "--providers.docker.exposedByDefault=false"
-      - "--log.level=INFO"
+      - "--log.level=DEBUG"
       - "--api.dashboard=true"
     ports:
       - "443:443"
       - "8080:8080"
     volumes:
       - ./security/traefik.yml:/etc/traefik/traefik.yml:ro,Z
+      - ./security/dynamic_conf.yml:/etc/traefik/dynamic_conf.yml:ro,Z
       - ./security/certs/:/certs/:ro,Z
       - /var/run/docker.sock:/var/run/docker.sock:ro,Z
 
@@ -32,8 +34,10 @@ services:
     command: start-dev --import-realm
     environment:
       KC_DB: dev-file
-      KC_BOOTSTRAP_ADMIN_USERNAME: admin
-      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      KEYCLOAK_USER: admin
+      KEYCLOAK_PASSWORD: admin
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
       KC_HTTP_RELATIVE_PATH: /
     volumes:
       - ./security/keycloak/realm-export.json:/opt/keycloak/data/import/realm.json:ro
@@ -74,9 +78,11 @@ services:
       OTEL_EXPORTER_OTLP_ENDPOINT: "otel-collector:4317"
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.rest.rule=PathPrefix(`/api`)"
+      - "traefik.http.routers.rest.rule=Host(`localhost`) && PathPrefix(`/api`)"
       - "traefik.http.routers.rest.entrypoints=websecure"
       - "traefik.http.services.rest.loadbalancer.server.port=5000"
+      - "traefik.http.routers.rest.tls=true"
+      - "traefik.http.routers.rest.tls.certresolver=default"
 
   prometheus:
     image: prom/prometheus:latest

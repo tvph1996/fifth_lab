@@ -17,12 +17,16 @@
   "users": [
     {
       "username": "tvph1996",
+      "firstName": "Vo Phuc Hung",
+      "lastName": "Tran",
       "enabled": true,
+      "email": "tvph1996@gmail.com",
       "emailVerified": true,
       "credentials": [
         {
           "type": "password",
-          "value": "H.g.t.124"
+          "value": "H.g.t.124",
+          "temporary": false
         }
       ],
       "realmRoles": [

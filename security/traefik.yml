@@ -1,19 +1,20 @@
 log:
   level: DEBUG
-
 api:
   dashboard: true
   insecure: true
-
 entryPoints:
   websecure:
     address: ":443"
-
 providers:
   docker:
     exposedByDefault: false
-
+  file:
+    filename: "/etc/traefik/dynamic_conf.yml"
+    watch: true
 tls:
-  certificates:
-    - certFile: "/certs/rest-service.crt"
-      keyFile: "/certs/rest-service.key"
+  stores:
+    default:
+      defaultCertificate:
+        certFile: "/certs/localhost.crt"
+        keyFile: "/certs/localhost.key"

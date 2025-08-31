@@ -154,7 +154,21 @@ GRPC_HOST = os.getenv("GRPC_HOST", "localhost")
 GRPC_PORT = os.getenv("GRPC_PORT", "50051")
 GRPC_ADDRESS = f"{GRPC_HOST}:{GRPC_PORT}"
 
-gRPC_channel = grpc.insecure_channel(GRPC_ADDRESS)
+# Load credentials for mTLS
+with open('security/certs/ca.crt', 'rb') as f:
+    root_cert = f.read()
+with open('security/certs/rest-service.key', 'rb') as f:
+    client_key = f.read()
+with open('security/certs/rest-service.crt', 'rb') as f:
+    client_cert = f.read()
+
+channel_credentials = grpc.ssl_channel_credentials(
+    root_certificates=root_cert,
+    private_key=client_key,
+    certificate_chain=client_cert
+)
+
+gRPC_channel = grpc.secure_channel(GRPC_ADDRESS, channel_credentials)
 gRPC_methods = myitems_pb2_grpc.ItemServiceStub(gRPC_channel)
 
 
@@ -192,7 +206,6 @@ async def add_item(request: Request):
             else:
                 
                 # Only create new channel when CircuitBreaker is HALF_OPEN
-                gRPC_new_channel = grpc.insecure_channel(GRPC_ADDRESS)
                 gRPC_methods = myitems_pb2_grpc.ItemServiceStub(gRPC_new_channel)
                 response = breaker.call(gRPC_methods.AddItem, grpc_request, timeout=1.0)
             
@@ -232,16 +245,16 @@ def get_items(item_id: int = 0, name: str = ""):
         if not item_id and not name:
             raise HTTPException(status_code=400, detail="Provide 'id' or 'name'.")
 
-        with grpc.insecure_channel(GRPC_ADDRESS) as channel:
-            stub = myitems_pb2_grpc.ItemServiceStub(channel)
-            request = myitems_pb2.Item(id=item_id, name=name)
-            responses = stub.GetItem(request, timeout=2.0)
-            results = [{"id": resp.requested_item.id, "name": resp.requested_item.name} for resp in responses if resp.result]
 
-            if not results:
-                raise HTTPException(status_code=404, detail="No items found.")
+        stub = myitems_pb2_grpc.ItemServiceStub(gRPC_channel)
+        request = myitems_pb2.Item(id=item_id, name=name)
+        responses = stub.GetItem(request, timeout=2.0)
+        results = [{"id": resp.requested_item.id, "name": resp.requested_item.name} for resp in responses if resp.result]
 
-            return {"message": "Items retrieved successfully.", "items": results}
+        if not results:
+            raise HTTPException(status_code=404, detail="No items found.")
+
+        return {"message": "Items retrieved successfully.", "items": results}
 
 
     except grpc.RpcError as e:
@@ -263,13 +276,13 @@ async def update_item(item_id: int, request: Request):
         if not new_name:
             raise HTTPException(status_code=400, detail="The 'name' field is required in the request body.")
 
-        with grpc.insecure_channel(GRPC_ADDRESS) as channel:
-            stub = myitems_pb2_grpc.ItemServiceStub(channel)
-            item_to_update = myitems_pb2.Item(id=item_id, name=new_name)
-            response = stub.UpdateItem(item_to_update, timeout=2.0)
 
-            if response.result:
-                return {"message": f"Item {item_id} updated successfully.", "old_item": {"id": response.old_item.id, "name": response.old_item.name}, "new_item": {"id": response.new_item.id, "name": response.new_item.name}}
+        stub = myitems_pb2_grpc.ItemServiceStub(gRPC_channel)
+        item_to_update = myitems_pb2.Item(id=item_id, name=new_name)
+        response = stub.UpdateItem(item_to_update, timeout=2.0)
+
+        if response.result:
+            return {"message": f"Item {item_id} updated successfully.", "old_item": {"id": response.old_item.id, "name": response.old_item.name}, "new_item": {"id": response.new_item.id, "name": response.new_item.name}}
 
 
     except grpc.RpcError as e:
@@ -288,13 +301,12 @@ async def update_item(item_id: int, request: Request):
 def delete_item(item_id: int):
     try:
 
-        with grpc.insecure_channel(GRPC_ADDRESS) as channel:
-            stub = myitems_pb2_grpc.ItemServiceStub(channel)
-            request = myitems_pb2.Item(id=item_id)
-            response = stub.DeleteItem(request, timeout=2.0)
+        stub = myitems_pb2_grpc.ItemServiceStub(gRPC_channel)
+        request = myitems_pb2.Item(id=item_id)
+        response = stub.DeleteItem(request, timeout=2.0)
 
-            if response.result:
-                return {"message": "Successfully deleted item.", "deleted_item": {"id": response.deleted_item.id, "name": response.deleted_item.name}}
+        if response.result:
+            return {"message": "Successfully deleted item.", "deleted_item": {"id": response.deleted_item.id, "name": response.deleted_item.name}}
 
 
     except grpc.RpcError as e:
